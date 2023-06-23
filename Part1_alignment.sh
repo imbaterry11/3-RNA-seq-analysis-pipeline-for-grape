@@ -36,7 +36,7 @@ parallel -j 2  < barcode_remove.sh >& log &
 ##Use 'top' to monitor progress
 
 
-#7)QC
+#7)QC (for a 40-core machine)
 export PATH=/programs/FastQC-0.11.8:$PATH
 ls *_trimmed.fastq.gz | while read file; do echo fastqc ${file} ; done > fastqc.sh
 parallel -j 36  < fastqc.sh >& log &
