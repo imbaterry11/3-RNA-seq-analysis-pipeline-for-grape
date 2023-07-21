@@ -1,0 +1,361 @@
+---
+title: "RNA-seq data analysis for grapevine tutorial"
+author: "Hongrui Wang"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# RNA-seq data analysis for grapevine
+
+This is an RNA-seq analysis tutorial aiming to provide the entire analysis pipeline and the biological reasoning of all the steps included. The pipeline includes PCA-based outlier filtering, PCA-based general transcriptome characterization, DeSeq2-based normalization, WGCNA-based co-expression network analysis, DeSeq2-based differential expression analysis and GSEA-based pathway enrichment analysis.
+
+The tutorial is based on the method in Wang, H. et al. (2022) ‘Transcriptomic analysis of grapevine in response to ABA application reveals its diverse regulations during cold acclimation and deacclimation’, Fruit Research, 2(1), pp. 1–12. Available at: [here](https://doi.org/10.48130/FruRes-2022-0001)
+
+The demo data used in this tutorial is available at [here](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE184114)
+
+```{r needed libraries, echo = FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(DESeq2)
+library(ggpubr)
+library(tidyr)
+library(dplyr)
+library(WGCNA)
+library(wesanderson)
+library(Rmisc)
+library(factoextra)
+library(scales)
+library(Rmisc)
+library(tidyr)
+library(pracma)
+library(data.table)
+library(fgsea) #library(devtools)  install_github("ctlab/fgsea")
+```
+
+## Input files
+sample_metadata.txt is a metadata file providing the treatment of each sample (library) in the experiment. Here, we have two treatments: control and ABA (a plant hormone that tends to paly a role during winter dormancy). In this experiment, we are testing if the application of ABA on woolly grapevine buds would delay budbreak and the transcriptome mechanism associated with the delay. In the metadata file, 'Treatment' indicates the treatment during the experiment, and 'Time' indicates number of hours that the samples has been in treatment
+```{r input files coldata, echo = TRUE}
+#cold data is the metadata file
+coldata <- fread("sample_metadata.txt")
+```
+gene_count.txt is a gene count matrix with row.names as gene names and each column as a library.
+```{r input files cts, echo = TRUE}
+#cts data is the gene count matrix file
+cts_original <- fread("gene_count.txt")
+#remove duplications
+cts_original = cts_original[!duplicated(cts_original[,1]),]
+cts <- cts_original[,-c(1,36)]
+row.names(cts) = cts_original$V1
+colnames(cts) <- coldata$Sample_name
+```
+
+## Generate normalized gene count
+
+```{r DeSeq2 for normalization, echo=FALSE, warning=FALSE, message=FALSE}
+coldata$Time <-as.numeric(coldata$Time)
+coldata$Treatment <- factor(coldata$Treatment, levels = c("ABA","Control"))
+
+#Deseq2 model: design = ~ Treatment + Time  However, the design can be more complicated by including interaction
+dds <- DESeqDataSetFromMatrix(countData = cts, colData = coldata, design = ~ Treatment + Time)
+
+#Low count gene filtering. Criteria: Averagely, at least one count per sample
+keep <- rowSums(counts(dds)) >= ncol(cts)
+dds <- dds[keep,]
+dds_out <- DESeq(dds)
+vsd <- vst(dds_out, blind=FALSE)
+cts_normalized <- assay(vsd)
+cts_normalized <- as.data.frame(cts_normalized)
+```
+
+## PCA to detect outliers
+
+```{r PCA to detect outlier, echo=T}
+
+#Here we use vsd count for PCA
+PCA_All_genes <- prcomp(t(cts_normalized), scale = TRUE)
+fviz_eig(PCA_All_genes)
+eig.val_PCA_All_genes <- get_eigenvalue(PCA_All_genes)
+res_idv_PCA_All_genes <- get_pca_ind(PCA_All_genes)
+
+```
+
+PCA1, 2 and 3 (to detect outliers)
+
+```{r PCA to detect outlier plotting, echo=TRUE}
+PCA_All_genes_figure_data <- data.frame(coldata,res_idv_PCA_All_genes$coord[,1:4])
+PCA_All_genes_figure_data$Time <- factor(PCA_All_genes_figure_data$Time,
+                                         levels = c("0","6","12","24","48","72"),
+                                         labels = c("0 h", "6 h","12 h","24 h","48 h","72 h"))
+
+percentVar_PCA_All_genes <- round(eig.val_PCA_All_genes$variance.percent,1)
+
+PCA_All_genes_figure <- ggplot(PCA_All_genes_figure_data, aes(x=Dim.1, y=Dim.2, shape = Treatment)) +
+  scale_fill_manual(values = c("#FFFFCC","#FED976","#FEB24C", "#FD8D3C", "#FC4E2A", "#BD0026"), aesthetics = "fill") +
+  scale_shape_manual(values = c(21,24),labels = c("Control","ABA")) +
+  geom_point(aes(fill = Time), color= "Black", size = 4) +
+  xlab(paste0("PC1: ",percentVar_PCA_All_genes[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar_PCA_All_genes[2],"% variance")) +
+  theme_bw() + 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(axis.title = element_text(color = "black",size = 16, face = "bold" )) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(legend.direction = "vertical", legend.box = "vertical") + 
+  theme(axis.text.y  = element_text(color = "black",size = 12),
+        axis.text.x  = element_text(color = "black",size = 12)) + 
+  theme(plot.title= element_text(color="Black", size=18, face="bold.italic", hjust=0.5)) + 
+  theme(legend.text = element_text(color="Black", size = 14, face = "bold")) +
+  theme(legend.title = element_text(color="Black", size = 14, face = "bold")) +
+  labs(fill = "Time post-treatment")  +
+  theme(legend.text = element_text(color="Black", size = 12, face = "bold")) +
+  theme(legend.title = element_text(color="Black", size = 12, face = "bold")) +
+  guides(fill = guide_legend(override.aes=list(shape=21),order = 2),shape = guide_legend(order = 1)) 
+
+  PCA_All_genes_figure
+
+  PCA_All_genes_figure_2 <- ggplot(PCA_All_genes_figure_data, aes(x=Dim.2, y=Dim.3, shape = Treatment)) +
+    scale_fill_manual(values = c("#FFFFCC","#FED976","#FEB24C", "#FD8D3C", "#FC4E2A", "#BD0026"), aesthetics = "fill") +
+    scale_shape_manual(values = c(21,24),labels = c("Control","ABA")) +
+    geom_point(aes(fill = Time), color= "Black", size = 4) +
+    xlab(paste0("PC2: ",percentVar_PCA_All_genes[2],"% variance")) +
+    ylab(paste0("PC3: ",percentVar_PCA_All_genes[3],"% variance")) +
+    theme_bw() + 
+    theme(axis.line = element_line(colour = "black")) +
+    theme(axis.title = element_text(color = "black",size = 16, face = "bold" )) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    theme(legend.direction = "vertical", legend.box = "vertical") + 
+    theme(axis.text.y  = element_text(color = "black",size = 12),
+          axis.text.x  = element_text(color = "black",size = 12)) + 
+    theme(plot.title= element_text(color="Black", size=18, face="bold.italic", hjust=0.5)) + 
+    theme(legend.text = element_text(color="Black", size = 14, face = "bold")) +
+    theme(legend.title = element_text(color="Black", size = 14, face = "bold")) +
+    labs(fill = "Time post-treatment")  +
+    theme(legend.text = element_text(color="Black", size = 12, face = "bold")) +
+    theme(legend.title = element_text(color="Black", size = 12, face = "bold")) +
+    guides(fill = guide_legend(override.aes=list(shape=21),order = 2),shape = guide_legend(order = 1)) 
+  
+PCA_All_genes_figure_2
+```
+None of these samples seem to be an outlier, so we move to the next step to do WGCNA for co-expression network analysis. 
+
+## WGCNA for co-expression network analysis
+```{r WGCNA, echo = FALSE, results='hide'}
+#Here we do WGCNA with vsd count as suggested by the author
+
+datExpr = as.data.frame(t(cts_normalized))
+nGenes = ncol(datExpr)
+nSamples = nrow(datExpr)
+
+#WGCNA setting
+options(stringsAsFactors = FALSE)
+
+#If there is a good reason, you can filter your sample again. For this tutorial, we will not filter anymore.
+filtered_coldata <- coldata
+datTraits <- data.frame(filtered_coldata[,-1])
+row.names(datTraits) = filtered_coldata$Sample_name
+
+# One-step network construction and module detection. Here we are using power = 12 as a default setting.
+net = blockwiseModules(datExpr, power = 12, networkType = "signed",
+                       TOMType = "signed", minModuleSize = 50,
+                       reassignThreshold = 0, mergeCutHeight = 0.25,
+                       numericLabels = TRUE, pamRespectsDendro = FALSE,
+                       verbose = 3)
+
+#Caution: WGCNA might conflict with other packages and resulted in "Error" by the end of blockwiseModules.
+#to solve this, do "cor <- WGCNA::cor" before running blockwiseModules, and do "cor<-stats::cor" after the run is done.
+
+#WGCNA result processing
+table(net$colors)
+mergedColors = labels2colors(net$colors)
+table(mergedColors)
+moduleLabels = net$colors
+moduleColors = labels2colors(net$colors)
+
+#Process eigengenes
+MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+modNames = substring(names(MEs), 3)
+```
+Now we have constructed the gene co-expression network and processed module eigengenes (MEs). We have to do some analysis and visualize the result to make decisions for the next step.
+
+```{r WGCNA visualization correlation analysis, echo = T, warning=FALSE}
+#Correlation analysis of MEs and your variables of interest. In the design of this experiment, we should care about if there are genes responding to 1) Treatment and 2) Time under treatment (columns 1 and 2)
+#Here the number in c() should be the column number of your variable of interest
+
+#WGCNA can only handle correlation analysis using numeric variables. Thus, we have to transform our treatment to boolean type values (0 or 1) to facilitate the analysis.
+
+datTraits_analysis = datTraits
+datTraits_analysis$Treatment = ifelse(datTraits_analysis$Treatment == 'ABA', 1, 0)
+#So ABA is 1 and control is 0. A positive correlation of ME with Treatment means the genes in the module tend to be up-regulated by ABA compared to control.
+
+moduleTraitCor = cor(MEs, datTraits_analysis[,c(1,2)], use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+                   signif(moduleTraitPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor)
+
+
+#Module_trait relationships plot
+
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = colnames(datTraits_analysis)[c(1,2)],
+               ySymbols = names(MEs),
+               yLabels = names(MEs),
+               colorLabels = FALSE,
+               colors =  blueWhiteRed(100),
+               setStdMargins = FALSE,
+               cex.text = 0.5,
+               textMatrix = textMatrix,
+               zlim = c(-1,1),
+               main = paste("Module-trait relationships"),
+               cex.lab.x = 0.7,
+               cex.lab.y = 0.5,
+               xLabelsAngle = 30,
+               xLabelsPosition = "bottom",
+               xLabelsAdj = 0.9)
+
+##There might be some issues with showing the plot in Rmd
+```
+
+Based on the correlation analysis, we can easily tell that MEbrown and MEyellow are the modules that show most significant positive correlation with treatment. This result indicates that the genes in these two modules are generally upregulated by ABA. In contrast, MEred and MEgreen are the top two module that show negative correlation with treatment, indicating that the genes in these modules are downregulated by ABA. 
+
+Since our firsts goal is the identify ABA's impact on transcriptome, we are ignoring the 'Time' variable. During the analysis of a project in real world, we have to consider to effect of each variable. 
+
+```{r WGCNA visualization MEs ploting, echo=TRUE,warning=FALSE}
+
+#Summary of number of gene per module
+N_gene_per_module <- as.data.frame(table(mergedColors))
+names(N_gene_per_module) = c("module_name", "Gene_number")
+N_gene_per_module <- N_gene_per_module[order(-N_gene_per_module$Gene_number),]
+module_name <- N_gene_per_module$module_name
+N_gene_per_module$name_and_number <- paste("ME",N_gene_per_module$module_name," (",N_gene_per_module$Gene_number,")", sep ="")
+
+#Visualization of Model eigengenes (MEs)
+sample_name <- row.names(datTraits)
+MEs_visualization <- data.frame(sample_name,MEs,datTraits)
+MEs_visualization$Treatment <-factor(MEs_visualization$Treatment)
+MEs_visualization_long <- gather(MEs_visualization,Module,ME,colnames(MEs)[1]:MEgrey, factor_key=TRUE)
+
+#Summarizing
+module_levels = paste0("ME",N_gene_per_module$module_name)
+MEs_visualization_long$Module = factor(MEs_visualization_long$Module,levels = module_levels,labels  = N_gene_per_module$name_and_number)
+
+MEs_visualization_long$Treatment <- factor(MEs_visualization_long$Treatment, levels = c("Control","ABA"))
+MEs_visualization_long$Time <- factor(MEs_visualization_long$Time, levels = c("0","6","12","24","48","72"))
+
+pd <- position_dodge(0.2)
+
+MEs_visualization_1 <- ggplot (MEs_visualization_long,aes(x=Time, y=ME, group = Treatment, color = Treatment)) +
+  geom_jitter(size = 1.5, alpha = 0.8) +
+  geom_smooth(aes(x=Time, y=ME,fill =  Treatment), method = 'loess',alpha = 0.2) +
+  facet_wrap( ~ Module,scales = "free_y",ncol = 4) + 
+  xlab("Time post-treatment (h)") +
+  ylab("Module eigengene") +
+  theme_bw() + 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme(legend.direction = "vertical", legend.box = "vertical") + 
+  theme(axis.text = element_text(color = "black",size = 10)) + 
+  theme(strip.text=element_text(color="Black", size = 10, face = "bold"), strip.background = element_blank()) +
+  theme(axis.title = element_text(color = "black",size = 14, face = "bold" )) +
+  labs(color = "Treatment") +
+  scale_color_manual(values = c("red","blue")) +
+  scale_fill_manual(values = c("red","blue")) +
+  theme(axis.text.y = element_blank(),axis.ticks.y =  element_blank()) +
+  theme(legend.text = element_text(color="Black", size = 12, face = "bold")) +
+  theme(legend.title = element_text(color="Black", size = 12, face = "bold")) 
+
+MEs_visualization_1 
+#Note that module grey contains all the noise genes that can'bt be categorized to any co-expression modules.
+```
+The goal of the above steps (correlation analysis and the visualization of MEs) is to help us form the hypothesis for differential expression analysis in a complex factorial design experiment (especially when it's a time serial experiment).  
+
+Here, we can see that the MEs of module brown and module yellow are always higher in ABA treatment, whereas the MEs of module green and red are always lower in ABA treatment. Interestingly, the fitted lines using 'loess' function of MEbrown and MEyellow seem exactly opposite to the lines of MEred and MEgreen. This result might indicate that the genes in these modules are functional in similar pathways but are negative or positive regulator. To achieve a phenotypical change, it sometimes requires the coordination of negative regulators and positive regulators (e.g. upregulation of positive regulators along with downregulation of negative regulator). Based on this observation, one hypothesis we can form here is that, modules brown, yellow, green and red contains the genes whose expressions are consistently altered by ABA treatment during the experiment. To test tge hypothesis, we should first make sure if all the genes in these four modules are consistently responsive to ABA during the experiment. To do that, we should do a constrasting in DeSeq2.
+
+## GSEA for pathway enrichment analysis
+
+```{r DeSeq2 contrasting, echo = TRUE}
+
+#To test of hypothesis, the DeSeq2 model is simply just design = ~ Treatment
+dds <- DESeqDataSetFromMatrix(countData = cts, colData = coldata, design = ~ Treatment)
+
+#Low count genefiltering. Criterium: Averagely, at least one count per sample
+keep <- rowSums(counts(dds)) >= ncol(cts)
+dds <- dds[keep,]
+
+#DeSeq2
+dds_out <- DESeq(dds)
+resultsNames(dds_out)
+ddsout_normalized <- data.frame(counts(dds_out,normalized=TRUE))
+summary(results(dds_out, contrast=c("Treatment","ABA","Control")))
+
+#res_Treatment is a df containing all the statistics of the contrast
+res_Treatment <- data.frame(results(dds_out, contrast=c("Treatment","ABA","Control")))
+res_Treatment$V3_gene_name = row.names(cts)[keep]
+
+#Assign the module of each gene
+res_Treatment$module = moduleColors
+
+#Filter the whole gene list based on padj LFC and module
+res_Treatment_target = filter(res_Treatment, padj < 0.05, abs(log2FoldChange) > 1, module %in% c('brown','yellow','red','green'))
+
+```
+
+After filtering, 2381 genes were left. These genes are our target genes to identify if any pathways were significantly impacted by ABA treatment. To do that, we do some pathway enrichment analysis. Here, we use GSEA (gene set enrichment analysis).
+
+In each biological pathway, there are positive regulators and negative regulators. To test if the pathway is enriched or if a pathway is impacted, we have combined the impact of both types of regulators. This means that, the upregulated genes and the downregulated genes should be analyzed separately and together to reveal all the impacted pathways. 
+
+```{r decision and GSEA, echo = TRUE, warning=FALSE}
+
+#We use GSEA for the pathway enrichment analysis
+
+#Since the current gene name do not have proper functional annotation, we transform it to another gene name system that is properly annotated. 
+
+list <- read.delim("list_genes_vitis_correspondencesV3_1.txt", header = TRUE)
+Gene_function <- read.delim(file =  'Vitis_Net_gene_function.txt', header = T)
+
+res_Treatment_target$V1_gene_name = list$v1.name[match(res_Treatment_target$V3_gene_name, list$Final.v3.name..tentative.creation.of.new.genes)]
+res_Treatment_target$encoding_protein = Gene_function$Functional.annotation[match(res_Treatment_target$V1_gene_name, Gene_function$Unique.ID)]
+res_Treatment_target$pathway = Gene_function$Network[match(res_Treatment_target$V1_gene_name, Gene_function$Unique.ID)]
+
+#Some filtering, e.g., if there is no pathway assigned to the gene, we are not using the gene to do the pathway enrichment analysis
+
+res_Treatment_target = filter(res_Treatment_target, !is.na(pathway), !pathway == '')
+
+#Dataframe preparation for GSEA (We rank only based on absolute LFC here, but you can also rank based on pval or padj)
+
+#GSEA using all target DEGs
+res_Treatment_target_gsea = data.frame(gene = res_Treatment_target$V1_gene_name, LFC = abs (res_Treatment_target$log2FoldChange))
+res_Treatment_target_gsea = res_Treatment_target_gsea[order(res_Treatment_target_gsea$LFC, decreasing = T),]
+res_Treatment_target_gsea$rank = 1:nrow(res_Treatment_target_gsea)
+res_Treatment_target_gsea = res_Treatment_target_gsea[,-2]
+  
+ranks = deframe(res_Treatment_target_gsea)
+
+vitis_pathway <- gmtPathways("GSEA_geneset_from_VitisNet.gmt")
+
+fgsearesult_all = fgsea(pathways = vitis_pathway,
+                              stats = ranks,
+                              minSize = 2,
+                              maxSize = 500)
+
+#Which pathway were enriched?
+head(fgsearesult_all[order(padj), ])
+
+#It seems that Ribosome pathway was significantly enriched
+plotEnrichment(vitis_pathway[["vv23010Ribosome"]],
+               ranks) + labs(title="Ribosomal proteins")
+
+#The next step is to do gsea with only upregulated genes and only downregulated genes.
+
+```
+## Next steps
+
+The next step of the pipeline will be determined by the result from pathway enrichment analysis. Typically, the top pathways will be carefully scouted along with gene expression visualization to determine what is happening in the pathway. This step needs some help from external tools (e.g. Cytoscape). 
