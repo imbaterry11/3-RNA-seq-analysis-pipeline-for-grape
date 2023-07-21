@@ -4,13 +4,13 @@ This repo includes the whole pipeline for 3'RNA-seq analysis of grape tissue.
 ## Files description
 __Part1_alignment.sh__ includes all the code for 3'RNA-seq data trimming, alignment, QC and result output. These codes are for the operation under Linux. <br>
 <br>
-__3RNAseq_data_analysis_tutorial.Rmd__ includes all the steps from outlier detection to pathway enrichment analysis. <br>
+__3RNAseq_data_analysis_tutorial.md__ includes all the steps from outlier detection to pathway enrichment analysis. <br>
 <br>
-__gene_count.txt__ is a gene count files from Linux-based RNA-seq alignment. It is the output from __Part1_alignment.sh__ and one of the input for __3RNAseq_data_analysis_tutorial.Rmd__. <br>
+__gene_count.txt__ is a gene count files from Linux-based RNA-seq alignment. It is the output from __Part1_alignment.sh__ and one of the input for __3RNAseq_data_analysis_tutorial.md__. <br>
 <br>
-__sample_metadata.txt__ is the sample description file needed for differential expression analysis. It is another input for __3RNAseq_data_analysis_tutorial.Rmd__. <br>
+__sample_metadata.txt__ is the sample description file needed for differential expression analysis. It is another input for __3RNAseq_data_analysis_tutorial.md__. <br>
 <br>
-__All the other files__ are for the analysis in __3RNAseq_data_analysis_tutorial.Rmd__. <br>
+__All the other files__ are for the analysis in __3RNAseq_data_analysis_tutorial.md__. <br>
 
 
 ## Example RNA-seq data
