@@ -6,7 +6,7 @@ __Part1_alignment.sh__ includes all the code for 3'RNA-seq data trimming, alignm
 <br>
 __3RNAseq_data_analysis_tutorial.md__ includes all the steps from outlier detection to pathway enrichment analysis. <br>
 <br>
-__gene_count.txt__ is a gene count files from Linux-based RNA-seq alignment. It is the output from __Part1_alignment.sh__ and one of the input for __3RNAseq_data_analysis_tutorial.md__. <br>
+__gene_count.txt__ is a gene count files from Linux-based RNA-seq alignment. It is the output from __Part1_alignment.sh__ and one of the inputs for __3RNAseq_data_analysis_tutorial.md__. <br>
 <br>
 __sample_metadata.txt__ is the sample description file needed for differential expression analysis. It is another input for __3RNAseq_data_analysis_tutorial.md__. <br>
 <br>
